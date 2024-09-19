@@ -10,11 +10,15 @@ MotorController::MotorController()
     joint_state_pub_ = this->create_publisher<sensor_msgs::msg::JointState>("joint_states", 10);
 
     // Declare and get the parameter for publish rate
-    this->declare_parameter<int>("publish_rate", 100);
-    this->get_parameter("publish_rate", publish_rate_);
+    this->declare_parameter<int>("joint_state_publish_rate", 100);
+    this->declare_parameter<int>("motor_command_publish_rate", 100);
+    this->get_parameter("joint_state_publish_rate", joint_state_publish_rate_);
+    this->get_parameter("motor_command_publish_rate", motor_command_publish_rate_);
+
     // Declare and get the parameter for motor type
     this->declare_parameter<std::string>("motor_type", "GO_M8010_6");
     this->get_parameter("motor_type", motor_type_);
+
     // set selected_motor_type_ based on the motor type
     if (motor_type_ == "A1") {
         selected_motor_type_ = MotorType::A1;
@@ -34,12 +38,12 @@ MotorController::MotorController()
 
     // Timer to publish current motor state periodically
     joint_state_timer_ = this->create_wall_timer(
-        std::chrono::milliseconds(1000 / publish_rate_),
+        std::chrono::milliseconds(1000 / joint_state_publish_rate_),
         std::bind(&MotorController::publishJointState, this));
 
     // Timer to update motor position at a fixed rate
     motor_command_timer_ = this->create_wall_timer(
-        std::chrono::milliseconds(1000 / publish_rate_),
+        std::chrono::milliseconds(1000 / motor_command_publish_rate_),
         std::bind(&MotorController::updateMotorPosition, this));
 
     // Initialize motor parameters
@@ -107,7 +111,7 @@ void MotorController::updateMotorPosition() {
     }
 
     // Calculate the time interval in seconds from the publish rate
-    float time_interval = 1.0 / publish_rate_;
+    float time_interval = 1.0 / motor_command_publish_rate_;
 
     // Calculate the incremental step based on the desired speed
     float increment = (speed * time_interval) * (distance_to_target > 0 ? 1 : -1);
@@ -143,7 +147,10 @@ void MotorController::publishJointState() {
     // Calculate current angle relative to the initial position
     double current_position = motor_data_.q / gear_ratio_ * (180 / M_PI);
     joint_state_msg.position.push_back(current_position - initial_position_);
-    
+    joint_state_msg.velocity.push_back(motor_data_.dq / gear_ratio_ * (180 / M_PI));
+    joint_state_msg.effort.push_back(motor_data_.tau);
+    joint_state_msg.header.frame_id = joint_name_;
+ 
     joint_state_pub_->publish(joint_state_msg);
 }
 

@@ -7,10 +7,15 @@ from launch_ros.actions import Node
 
 def generate_launch_description():
     # Declare the launch arguments
-    declare_publish_rate_cmd = DeclareLaunchArgument(
-        'publish_rate',
-        default_value='100',
-        description='Publish rate for the motor controller')
+    declare_joint_state_publish_rate_cmd = DeclareLaunchArgument(
+            'joint_state_publish_rate',
+            default_value='10',
+            description='Rate at which to publish joint states')
+    
+    declare_motor_command_publish_rate_cmd = DeclareLaunchArgument(
+            'motor_command_publish_rate',
+            default_value='100',
+            description='Rate at which to send motor commands')
 
     declare_motor_type_cmd = DeclareLaunchArgument(
         'motor_type',
@@ -34,7 +39,8 @@ def generate_launch_description():
         name='motor_controller',
         output='screen',
         parameters=[{
-            'publish_rate': LaunchConfiguration('publish_rate'),
+            'joint_state_publish_rate': LaunchConfiguration('joint_state_publish_rate'),
+            'motor_command_publish_rate': LaunchConfiguration('motor_command_publish_rate'),
             'motor_type': LaunchConfiguration('motor_type'),
             'motor_id': LaunchConfiguration('motor_id'),
             'joint_name': LaunchConfiguration('joint_name')
@@ -42,7 +48,8 @@ def generate_launch_description():
     )
 
     return LaunchDescription([
-        declare_publish_rate_cmd,
+        declare_joint_state_publish_rate_cmd,
+        declare_motor_command_publish_rate_cmd,
         declare_motor_type_cmd,
         declare_motor_id_cmd,
         declare_joint_name_cmd,

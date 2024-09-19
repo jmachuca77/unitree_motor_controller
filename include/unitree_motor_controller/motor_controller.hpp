@@ -16,7 +16,10 @@ private:
     void jointPositionCallback(const std_msgs::msg::Float64::SharedPtr msg);
     void publishJointState();
     void updateMotorPosition();
-    
+
+    // Parameter change callback
+    rcl_interfaces::msg::SetParametersResult parameterCallback(const std::vector<rclcpp::Parameter> &parameters);
+
     rclcpp::Subscription<std_msgs::msg::Float64>::SharedPtr joint_position_sub_;
     rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr joint_state_pub_;
     rclcpp::TimerBase::SharedPtr joint_state_timer_;
@@ -39,14 +42,14 @@ private:
     MotorType selected_motor_type_; // Motor type
 
     // ROS Parameters
-    // Parameter to set the motor type
-    std::string motor_type_;
-    // Parameter to set the motor ID
-    int motor_id_;
-    // Parameter to set the joint name
-    std::string joint_name_;
+    std::string motor_type_;  // Parameter to set the motor type
+    int motor_id_; // Parameter to set the motor ID
+    std::string joint_name_; // Parameter to set the joint name
+    int joint_state_publish_rate_;
+    int motor_command_publish_rate_;
 
-    int publish_rate_; // Publish rate for motor commands
+    float max_position_; // Maximum position limit
+    float min_position_; // Minimum position limit
     float max_speed_ = 300; // Maximum speed for motor movement
     float min_speed_ = 5.0;  // Minimum speed limit to avoid stopping too early
     float ramp_distance_ = 10.0; // Distance within which to start slowing down

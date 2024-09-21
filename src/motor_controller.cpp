@@ -68,7 +68,7 @@ MotorController::MotorController()
     motor_data_.motorType = selected_motor_type_;
 
     motor_cmd_.mode = queryMotorMode(selected_motor_type_, MotorMode::BRAKE);
-    motor_cmd_.id = 0;
+    motor_cmd_.id = motor_id_;
     motor_cmd_.kp = 0.0;
     motor_cmd_.kd = 0.0;
     motor_cmd_.q = 0.0;
@@ -126,7 +126,7 @@ void MotorController::updateMotorPosition() {
     motor_cmd_.motorType = selected_motor_type_;
     motor_data_.motorType = selected_motor_type_;
     motor_cmd_.mode  = queryMotorMode(selected_motor_type_, MotorMode::FOC);
-    motor_cmd_.id    = 0;
+    motor_cmd_.id    = motor_id_;
     motor_cmd_.kp    = rotor_kp_;
     motor_cmd_.kd    = rotor_kd_;
     motor_cmd_.q     = rotor_angle_d;

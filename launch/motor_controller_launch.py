@@ -7,6 +7,16 @@ from launch_ros.actions import Node
 
 def generate_launch_description():
     # Declare the launch arguments
+    declare_motor_config_file_cmd = DeclareLaunchArgument(
+        'motor_config_file',
+        default_value=os.path.join(
+            get_package_share_directory('unitree_motor_controller'),
+            'config',
+            'unitree_motor_config.yaml'
+        ),
+        description='Full path to the motor config file to load'
+    )
+
     declare_joint_state_publish_rate_cmd = DeclareLaunchArgument(
             'joint_state_publish_rate',
             default_value='10',
@@ -39,6 +49,7 @@ def generate_launch_description():
         name='motor_controller',
         output='screen',
         parameters=[{
+            'config_file': LaunchConfiguration('motor_config_file'),
             'joint_state_publish_rate': LaunchConfiguration('joint_state_publish_rate'),
             'motor_command_publish_rate': LaunchConfiguration('motor_command_publish_rate'),
             'motor_type': LaunchConfiguration('motor_type'),
@@ -48,6 +59,7 @@ def generate_launch_description():
     )
 
     return LaunchDescription([
+        declare_motor_config_file_cmd,
         declare_joint_state_publish_rate_cmd,
         declare_motor_command_publish_rate_cmd,
         declare_motor_type_cmd,

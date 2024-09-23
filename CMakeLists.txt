@@ -10,6 +10,7 @@ find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
+find_package(yaml-cpp REQUIRED)
 
 include_directories(include)
 link_directories(${CMAKE_CURRENT_SOURCE_DIR}/lib)
@@ -33,7 +34,7 @@ if(NOT TARGET motor_controller)
 endif()
 
 # Link the Unitree Motor library
-target_link_libraries(motor_controller ${EXTRA_LIBS})
+target_link_libraries(motor_controller ${EXTRA_LIBS} yaml-cpp)
 
 ament_target_dependencies(motor_controller rclcpp sensor_msgs std_msgs)
 
@@ -56,6 +57,11 @@ install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/lib/lib${EXTRA_LIBS}.so
 # Install launch files
 install(DIRECTORY launch/
   DESTINATION share/${PROJECT_NAME}/launch
+)
+
+# Install config files
+install(DIRECTORY config/
+  DESTINATION share/${PROJECT_NAME}/config
 )
 
 ament_package()

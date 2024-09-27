@@ -2,18 +2,13 @@
 #include <yaml-cpp/yaml.h>
 #include <fstream>
 
+
 MotorController::MotorController()
 : Node("motor_controller"), serial_("/dev/ttyUSB0") {
-    // Load motor limits from YAML config file
-    bool calibrated = loadMotorLimits();
-
     // Create a subscriber to the 'joint_position' topic
-    joint_position_sub_ = this->create_subscription<std_msgs::msg::Float64>(
-        "joint_position", 10, std::bind(&MotorController::jointPositionCallback, this, std::placeholders::_1));
+    joint_position_sub_ = this->create_subscription<bdx_msgs::msg::JointPositionTarget>(
+        "joint_position_target", 10, std::bind(&MotorController::jointPositionCallback, this, std::placeholders::_1));
     
-    // Create a publisher for the 'joint_states' topic
-    joint_state_pub_ = this->create_publisher<sensor_msgs::msg::JointState>("joint_states", 10);
-
     // Declare and get the parameter for publish rate
     this->declare_parameter<int>("joint_state_publish_rate", 100);
     this->declare_parameter<int>("motor_command_publish_rate", 100);
@@ -26,6 +21,8 @@ MotorController::MotorController()
 
     // Declare the paramter file
     this->declare_parameter<std::string>("config_file", "/home/toro/motor_limits.yaml");
+    this->get_parameter("config_file", config_file_);
+    RCLCPP_INFO(this->get_logger(), "Config file: %s", config_file_.c_str());
 
     // Set motor type logic
     if (motor_type_ == "A1") {
@@ -42,6 +39,12 @@ MotorController::MotorController()
     // Declare and get the parameter for joint name
     this->declare_parameter<std::string>("joint_name", "unitree_motor_joint");
     this->get_parameter("joint_name", joint_name_);
+
+    // Create a publisher for the 'joint_states' topic
+    joint_state_pub_ = this->create_publisher<sensor_msgs::msg::JointState>(joint_name_ + "_status", 10);
+
+    // Load motor limits from YAML config file
+    bool calibrated = loadMotorLimits();
 
     // Timer to publish current motor state periodically
     joint_state_timer_ = this->create_wall_timer(
@@ -97,11 +100,10 @@ MotorController::~MotorController() {
 }
 
 bool MotorController::loadMotorLimits() {
-    std::string config_file;
-    this->get_parameter("config_file", config_file);
+    RCLCPP_INFO(this->get_logger(), "Loading motor limits from %s", config_file_.c_str());
 
     try {
-        YAML::Node config = YAML::LoadFile(config_file);
+        YAML::Node config = YAML::LoadFile(config_file_);
         min_position_ = config["min_position"].as<float>();
         max_position_ = config["max_position"].as<float>();
         float min_adjusted_postion = min_position_ - initial_position_;
@@ -184,25 +186,22 @@ bool MotorController::performMotorCalibration() {
 }
 
 bool MotorController::saveMotorLimits() {
-    std::string config_file;
-    this->get_parameter("config_file", config_file);
-    
     YAML::Node config;
     config["min_position"] = min_position_;
     config["max_position"] = max_position_;
     float min_adjusted_postion = min_position_ - initial_position_;
     float max_adjusted_postion = max_position_ - initial_position_;
 
-    std::ofstream fout(config_file);
+    std::ofstream fout(config_file_);
     fout << config;
-    RCLCPP_INFO(this->get_logger(), "Motor limits saved to %s: min=%.2f, max=%.2f", config_file.c_str(), min_adjusted_postion, max_adjusted_postion);
+    RCLCPP_INFO(this->get_logger(), "Motor limits saved to %s: min=%.2f, max=%.2f", config_file_.c_str(), min_adjusted_postion, max_adjusted_postion);
     return true;
 }
 
-void MotorController::jointPositionCallback(const std_msgs::msg::Float64::SharedPtr msg) {
+void MotorController::jointPositionCallback(const bdx_msgs::msg::JointPositionTarget::SharedPtr msg) {
     // Update the target position relative to the initial position
-    target_position_ = initial_position_ + msg->data;
-    movement_speed_ = max_speed_;
+    target_position_ = initial_position_ + msg->target_position;
+    movement_speed_ = msg->movement_speed;
     RCLCPP_INFO(this->get_logger(), "Received new target position: %.2f degrees, target speed: %.2f", target_position_, movement_speed_);
 }
 
@@ -263,7 +262,7 @@ void MotorController::publishJointState() {
     joint_state_msg.name.push_back(joint_name_);
 
     // Calculate current angle relative to the initial position
-    joint_state_msg.position.push_back(current_position_ - initial_position_);
+    joint_state_msg.position.push_back((current_position_ - initial_position_)* (M_PI / 180));
     joint_state_msg.velocity.push_back(current_velocity_);
     joint_state_msg.effort.push_back(current_effort_);
 

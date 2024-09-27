@@ -7,6 +7,7 @@
 #include "serialPort/SerialPort.h"
 #include "unitreeMotor/unitreeMotor.h"
 #include <yaml-cpp/yaml.h>
+#include "bdx_msgs/msg/joint_position_target.hpp"
 
 class MotorController : public rclcpp::Node {
 public:
@@ -14,7 +15,7 @@ public:
     ~MotorController(); // Destructor to handle cleanup
 
 private:
-    void jointPositionCallback(const std_msgs::msg::Float64::SharedPtr msg);
+    void jointPositionCallback(const bdx_msgs::msg::JointPositionTarget::SharedPtr msg);
     void publishJointState();
     void updateMotorPosition();
     
@@ -24,7 +25,7 @@ private:
     bool saveMotorLimits(); // Save motor limits to YAML file
 
     // ROS Parameters
-    rclcpp::Subscription<std_msgs::msg::Float64>::SharedPtr joint_position_sub_;
+    rclcpp::Subscription<bdx_msgs::msg::JointPositionTarget>::SharedPtr joint_position_sub_;
     rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr joint_state_pub_;
     rclcpp::TimerBase::SharedPtr joint_state_timer_;
     rclcpp::TimerBase::SharedPtr motor_command_timer_;
@@ -61,6 +62,8 @@ private:
     std::string joint_name_; // Parameter to set the joint name
     int joint_state_publish_rate_;
     int motor_command_publish_rate_;
+
+    std::string config_file_; // Parameter to set the config file path
 };
 
 #endif // MOTOR_CONTROLLER_HPP

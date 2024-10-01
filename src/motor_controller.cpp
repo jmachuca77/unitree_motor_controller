@@ -253,7 +253,7 @@ void MotorController::updateMotorPosition() {
     current_position_ = motor_data_.q / gear_ratio_ * (180 / M_PI);
     current_velocity_ = motor_data_.dq / gear_ratio_ * (180 / M_PI);
     current_effort_ = motor_data_.tau;
-    RCLCPP_INFO(this->get_logger(), "Current position: %.2f degrees, current speed: %.2f, movement speed: %.2f", current_position_, movement_speed_, current_velocity_);
+    RCLCPP_DEBUG(this->get_logger(), "Current position: %.2f degrees, current speed: %.2f, movement speed: %.2f", current_position_, movement_speed_, current_velocity_);
 }
 
 void MotorController::publishJointState() {

@@ -2,9 +2,13 @@
 #include <yaml-cpp/yaml.h>
 #include <fstream>
 
-
 MotorController::MotorController()
 : Node("motor_controller"), serial_("/dev/ttyUSB0") {
+
+    // Create services for calibration
+    start_calibration_service_ = this->create_service<std_srvs::srv::SetBool>(
+        "start_calibration", std::bind(&MotorController::startCalibration, this, std::placeholders::_1, std::placeholders::_2));
+
     // Create a subscriber to the 'joint_position' topic
     joint_position_sub_ = this->create_subscription<bdx_msgs::msg::JointPositionTarget>(
         "joint_position_target", 10, std::bind(&MotorController::jointPositionCallback, this, std::placeholders::_1));
@@ -44,7 +48,7 @@ MotorController::MotorController()
     joint_state_pub_ = this->create_publisher<sensor_msgs::msg::JointState>(joint_name_ + "_status", 10);
 
     // Load motor limits from YAML config file
-    bool calibrated = loadMotorLimits();
+    calibrated_ = loadMotorLimits();
 
     // Timer to publish current motor state periodically
     joint_state_timer_ = this->create_wall_timer(
@@ -77,26 +81,89 @@ MotorController::MotorController()
 
     motor_cmd_.motorType = selected_motor_type_;
     motor_data_.motorType = selected_motor_type_;
-    motor_cmd_.mode = queryMotorMode(selected_motor_type_, MotorMode::BRAKE);
-    motor_cmd_.id = motor_id_;
-    serial_.sendRecv(&motor_cmd_, &motor_data_);
+
+    sendRecvMotorCmd(motor_id_, queryMotorMode(selected_motor_type_, MotorMode::BRAKE), 0, 0, 0, 0, 0);
 
     // Record the initial motor position
-    initial_position_ = motor_data_.q / gear_ratio_ * (180 / M_PI);
-    current_position_ = initial_position_;
-    target_position_ = initial_position_;
+    initial_position_ = current_position_;
+    target_position_ = current_position_;
     RCLCPP_INFO(this->get_logger(), "Initial motor position set to %.2f degrees as the reference.", initial_position_);
 
-    if (!calibrated) {
-        RCLCPP_WARN(this->get_logger(), "Motor calibration required. Please move motor to the limits.");
-        performMotorCalibration();
+    if (!calibrated_) {
+        RCLCPP_WARN(this->get_logger(), "Motor calibration required. Please perform the motor routine.");
     }
 }
 
 MotorController::~MotorController() {
     RCLCPP_INFO(this->get_logger(), "Setting motor to BRAKE mode before shutdown.");
-    motor_cmd_.mode = queryMotorMode(selected_motor_type_, MotorMode::BRAKE);
+    sendRecvMotorCmd(motor_id_, queryMotorMode(selected_motor_type_, MotorMode::BRAKE), 0, 0, 0, 0, 0);
+}
+
+// wrapper function for serial_.sendRecv that sends the motor command and updates the current position, velocity and effort member variables
+void MotorController::sendRecvMotorCmd(unsigned short id, unsigned short mode, float tau, float dq, float q, float kp, float kd) {
+    motor_cmd_.id = id;
+    motor_cmd_.mode = mode;
+    motor_cmd_.tau = tau;
+    motor_cmd_.dq = dq;
+    motor_cmd_.q = q;
+    motor_cmd_.kp = kp;
+    motor_cmd_.kd = kd;
     serial_.sendRecv(&motor_cmd_, &motor_data_);
+
+    current_position_ = motor_data_.q / gear_ratio_ * (180 / M_PI);
+    current_velocity_ = motor_data_.dq / gear_ratio_ * (180 / M_PI);
+    current_effort_ = motor_data_.tau;
+}
+
+void MotorController::startCalibration(const std::shared_ptr<std_srvs::srv::SetBool::Request> request,
+                                       std::shared_ptr<std_srvs::srv::SetBool::Response> response) {
+    if (request->data) {
+        if (!is_calibrating_) {
+            is_calibrating_ = true;
+            min_position_ = std::numeric_limits<float>::max();
+            max_position_ = std::numeric_limits<float>::lowest();
+            sendRecvMotorCmd(motor_id_, queryMotorMode(selected_motor_type_, MotorMode::FOC), 0, 0, 0, 0, 0);
+            calibration_timer_ = this->create_wall_timer(
+                std::chrono::milliseconds(100), std::bind(&MotorController::calibrationLoop, this));
+            response->success = true;
+            response->message = "Calibration started.";
+        } else {
+            response->success = false;
+            response->message = "Calibration is already in progress.";
+        }
+    } else {
+        if (is_calibrating_) {
+            is_calibrating_ = false;
+            calibration_timer_->cancel();
+            response->success = true;
+            response->message = "Calibration stopped.";
+            bool saved = saveMotorLimits();
+            if (saved) {
+                RCLCPP_INFO(this->get_logger(), "Motor limits saved to %s", config_file_.c_str());
+                calibrated_ = true;
+            } else {
+                RCLCPP_ERROR(this->get_logger(), "Failed to save motor limits to %s", config_file_.c_str());
+            }
+            RCLCPP_INFO(this->get_logger(), "Calibration completed. Min position: %.2f, Max position: %.2f", min_position_, max_position_);
+        } else {
+            response->success = false;
+            response->message = "Calibration is not in progress.";
+        }
+    }
+}
+
+void MotorController::calibrationLoop() {
+
+    sendRecvMotorCmd(motor_id_, queryMotorMode(selected_motor_type_, MotorMode::FOC), 0, 0, 0, 0, 0);
+
+    if (current_position_ < min_position_) {
+        min_position_ = current_position_;
+        RCLCPP_INFO(this->get_logger(), "New Min position: %.2f", min_position_);
+    }
+    if (current_position_ > max_position_) {
+        max_position_ = current_position_;
+        RCLCPP_INFO(this->get_logger(), "New Max position: %.2f", max_position_);
+    }
 }
 
 bool MotorController::loadMotorLimits() {
@@ -116,73 +183,6 @@ bool MotorController::loadMotorLimits() {
     }
 
     return true;
-}
-
-bool MotorController::performMotorCalibration() {
-    RCLCPP_INFO(this->get_logger(), "Move the motor to the first limit (min or max), waiting for position change...");
-    motor_cmd_.mode = queryMotorMode(selected_motor_type_, MotorMode::BRAKE);
-    serial_.sendRecv(&motor_cmd_, &motor_data_);
-
-    bool min_position_detected = false;
-    bool max_position_detected = false;
-
-    float start_position = motor_data_.q / gear_ratio_ * (180 / M_PI);
-    float last_position = start_position;
-    auto start_time = this->now();
-
-    // Wait for motor position to stop changing
-    while (rclcpp::ok()) {
-        serial_.sendRecv(&motor_cmd_, &motor_data_);
-        current_position_ = motor_data_.q / gear_ratio_ * (180 / M_PI);
-
-        if ((fabs(current_position_ - last_position) < 0.01) && (current_position_ != initial_position_)) {
-            if ((this->now() - start_time).seconds() > 10) {
-                min_position_ = current_position_;
-                min_position_detected = true;
-                RCLCPP_INFO(this->get_logger(), "First limit (min or max) detected at %.2f degrees.", min_position_);
-                break;
-            }
-        } else {
-            start_time = this->now();
-        }
-        last_position = current_position_;
-        rclcpp::sleep_for(std::chrono::milliseconds(100));
-    }
-
-    RCLCPP_INFO(this->get_logger(), "Now move the motor to the other limit (opposite end)...");
-
-    // Similar logic for detecting the second limit
-    start_time = this->now();
-    last_position = motor_data_.q / gear_ratio_ * (180 / M_PI);
-
-    while (rclcpp::ok()) {
-        serial_.sendRecv(&motor_cmd_, &motor_data_);
-        current_position_ = motor_data_.q / gear_ratio_ * (180 / M_PI);
-
-        if ((fabs(current_position_ - last_position) < 0.01)  && (current_position_ != initial_position_) && (current_position_ != min_position_)) {
-            if ((this->now() - start_time).seconds() > 10) {
-                max_position_ = current_position_;
-                max_position_detected = true;
-                RCLCPP_INFO(this->get_logger(), "Second limit (min or max) detected at %.2f degrees.", max_position_);
-                break;
-            }
-        } else {
-            start_time = this->now();
-        }
-        last_position = current_position_;
-        rclcpp::sleep_for(std::chrono::milliseconds(100));
-    }
-
-    // set movement speed to 100 to slow down movement after calibaration is done
-    movement_speed_ = 100;
-
-    // Only call saveMotorLimits if both positions are detected
-    if (min_position_detected && max_position_detected) {
-        return saveMotorLimits();
-    } else {
-        RCLCPP_ERROR(this->get_logger(), "Cannot save motor limits. Both min and max positions must be detected.");
-        return false;
-    }
 }
 
 bool MotorController::saveMotorLimits() {
@@ -206,8 +206,14 @@ void MotorController::jointPositionCallback(const bdx_msgs::msg::JointPositionTa
 }
 
 void MotorController::updateMotorPosition() {
-    if (min_position_ == 0.0 || max_position_ == 0.0) {
-        RCLCPP_WARN(this->get_logger(), "Motor calibration required. Aborting motor control.");
+    // Motor Calibratiion is active, do not update motor position
+    if (is_calibrating_) {
+        return;
+    }
+
+    if (!calibrated_) {
+        RCLCPP_DEBUG(this->get_logger(), "Motor calibration required. Aborting motor control.");
+        sendRecvMotorCmd(motor_id_, queryMotorMode(selected_motor_type_, MotorMode::FOC), 0, 0, 0, 0, 0);
         return;
     }
 
@@ -243,16 +249,8 @@ void MotorController::updateMotorPosition() {
     float rotor_angle_d = (new_position * (M_PI / 180)) * gear_ratio_;
 
     // Send the command to the motor
-    motor_cmd_.motorType = selected_motor_type_;
-    motor_cmd_.mode = queryMotorMode(selected_motor_type_, MotorMode::FOC); // Resume normal operation
-    motor_cmd_.q = rotor_angle_d;
-    motor_cmd_.kp = rotor_kp_;
-    motor_cmd_.kd = rotor_kd_;
-    serial_.sendRecv(&motor_cmd_, &motor_data_);
+    sendRecvMotorCmd(motor_id_, queryMotorMode(selected_motor_type_, MotorMode::FOC), 0, 0, rotor_angle_d, rotor_kp_, rotor_kd_);
 
-    current_position_ = motor_data_.q / gear_ratio_ * (180 / M_PI);
-    current_velocity_ = motor_data_.dq / gear_ratio_ * (180 / M_PI);
-    current_effort_ = motor_data_.tau;
     RCLCPP_DEBUG(this->get_logger(), "Current position: %.2f degrees, current speed: %.2f, movement speed: %.2f", current_position_, movement_speed_, current_velocity_);
 }
 

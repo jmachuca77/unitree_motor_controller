@@ -8,6 +8,7 @@
 #include "unitreeMotor/unitreeMotor.h"
 #include <yaml-cpp/yaml.h>
 #include "bdx_msgs/msg/joint_position_target.hpp"
+#include "std_srvs/srv/set_bool.hpp"
 
 class MotorController : public rclcpp::Node {
 public:
@@ -15,6 +16,18 @@ public:
     ~MotorController(); // Destructor to handle cleanup
 
 private:
+    // Calibration service related functions
+    void startCalibration(const std::shared_ptr<std_srvs::srv::SetBool::Request> request,
+                          std::shared_ptr<std_srvs::srv::SetBool::Response> response);
+    void stopCalibration(const std::shared_ptr<std_srvs::srv::SetBool::Request> request,
+                         std::shared_ptr<std_srvs::srv::SetBool::Response> response);
+    void calibrationLoop();
+
+    rclcpp::Service<std_srvs::srv::SetBool>::SharedPtr start_calibration_service_;
+    rclcpp::TimerBase::SharedPtr calibration_timer_;
+
+    // Motor control related functions
+    void sendRecvMotorCmd(unsigned short id, unsigned short mode, float tau, float dq, float q, float kp, float kd);
     void jointPositionCallback(const bdx_msgs::msg::JointPositionTarget::SharedPtr msg);
     void publishJointState();
     void updateMotorPosition();
@@ -50,8 +63,10 @@ private:
     MotorType selected_motor_type_; // Motor type
 
     // New members for motor limits
-    float max_position_ = 0.0f; // Maximum position limit
-    float min_position_ = 0.0f; // Minimum position limit
+    bool calibrated_ = false;
+    bool is_calibrating_ = false;
+    float max_position_ = std::numeric_limits<float>::lowest(); // Maximum position limit
+    float min_position_ = std::numeric_limits<float>::max(); // Minimum position limit
     float max_speed_ = 300; // Maximum speed for motor movement
     float min_speed_ = 5.0;  // Minimum speed limit to avoid stopping too early
     float ramp_distance_ = 10.0; // Distance within which to start slowing down

@@ -12,6 +12,7 @@ find_package(std_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(yaml-cpp REQUIRED)
 find_package(bdx_msgs REQUIRED)
+find_package(std_srvs REQUIRED) 
 
 include_directories(
   include
@@ -37,7 +38,7 @@ if(NOT TARGET motor_controller)
     add_executable(motor_controller src/motor_controller.cpp)
 endif()
 
-ament_target_dependencies(motor_controller rclcpp sensor_msgs std_msgs bdx_msgs)
+ament_target_dependencies(motor_controller rclcpp sensor_msgs std_msgs std_srvs bdx_msgs)
 
 # Link the Unitree Motor library
 target_link_libraries(motor_controller ${EXTRA_LIBS} yaml-cpp)

@@ -6,7 +6,7 @@ motors:
     output_kd: 0.5
     movement_speed: 300
   - motor_id: 2
-    joint_name: 'right_knww'
+    joint_name: 'right_knee'
     motor_type: 'A1'
     output_kp: 30.0
     output_kd: 0.5

@@ -7,7 +7,6 @@
 #include "serialPort/SerialPort.h"
 #include "unitreeMotor/unitreeMotor.h"
 #include <yaml-cpp/yaml.h>
-#include "bdx_msgs/msg/joint_position_target.hpp"
 #include "std_srvs/srv/set_bool.hpp"
 #include <vector>
 #include <map>
@@ -46,12 +45,11 @@ private:
         float max_speed_; // Maximum speed for motor movement
         float min_speed_;  // Minimum speed limit to avoid stopping too early
         float ramp_distance_; // Distance within which to start slowing down
-        
+
         MotorCmd motor_cmd;
         MotorData motor_data;
 
         // ROS Publishers and Subscribers
-        rclcpp::Subscription<bdx_msgs::msg::JointPositionTarget>::SharedPtr joint_position_sub_;
         rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr joint_state_pub_;
     };
 
@@ -65,7 +63,7 @@ private:
 
     // Motor control related functions
     void sendRecvMotorCmd(MotorParameters& motor, unsigned short mode, float tau, float dq, float q, float kp, float kd);
-    void jointPositionCallback(const bdx_msgs::msg::JointPositionTarget::SharedPtr msg, int motor_index);
+    void jointPositionCallback(const sensor_msgs::msg::JointState::SharedPtr msg);
     void publishJointState();
     void updateMotorPosition();
 
@@ -81,7 +79,7 @@ private:
     // New members for motor limits
     bool calibrated_;
     bool is_calibrating_;
-
+    
 
     // ROS Parameters
     std::vector<int> motor_ids_; // Array of motor IDs
@@ -91,6 +89,10 @@ private:
 
     // Collection of motors
     std::vector<MotorParameters> motors_;
+
+    // Joint position subscriber
+    rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr joint_position_sub_;
+
 };
 
 #endif // MOTOR_CONTROLLER_HPP

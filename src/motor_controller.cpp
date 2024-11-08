@@ -63,13 +63,6 @@ MotorController::MotorController()
         motor.motor_cmd.motorType = motor.selected_motor_type;
         motor.motor_data.motorType = motor.selected_motor_type;
 
-        // Create a subscriber to the 'joint_position_target' topic for each motor
-        motor.joint_position_sub_ = this->create_subscription<bdx_msgs::msg::JointPositionTarget>(
-            "joint_position_target_" + std::to_string(motor.motor_id), 10,
-            [this, i](const bdx_msgs::msg::JointPositionTarget::SharedPtr msg) {
-                this->jointPositionCallback(msg, i);
-            });
-
         // Create a publisher for the 'joint_states' topic for each motor
         motor.joint_state_pub_ = this->create_publisher<sensor_msgs::msg::JointState>(
             motor.joint_name + "_status", 10);
@@ -81,6 +74,9 @@ MotorController::MotorController()
 
         // Initialize motor
         sendRecvMotorCmd(motor, queryMotorMode(motor.selected_motor_type, MotorMode::BRAKE), 0, 0, 0, 0, 0);
+        // motor.initial_position = motor.current_position;
+        // motor.target_position = motor.current_position;
+        RCLCPP_INFO(this->get_logger(), "Motor %d initial position set to %.2f degrees as the reference.", motor.motor_id, motor.initial_position);
 
         motors_.push_back(motor);
     }
@@ -105,6 +101,12 @@ MotorController::MotorController()
     if (!calibrated_) {
         RCLCPP_WARN(this->get_logger(), "Motor calibration required. Please perform the motor routine.");
     }
+
+    // Create a subscriber to the 'joint_position_target' topic
+    joint_position_sub_ = this->create_subscription<sensor_msgs::msg::JointState>(
+        "joint_position_target", 10,
+        std::bind(&MotorController::jointPositionCallback, this, std::placeholders::_1));
+
 }
 
 MotorController::~MotorController() {
@@ -194,14 +196,19 @@ bool MotorController::loadMotorLimits() {
         YAML::Node limits = config["motor_limits"];
         for (auto& motor : motors_) {
             int id = motor.motor_id;
-            motor.min_position = limits[id]["min_position"].as<float>();
-            motor.max_position = limits[id]["max_position"].as<float>();
-            float min_adjusted_position = motor.min_position - motor.initial_position;
-            float max_adjusted_position = motor.max_position - motor.initial_position;
+            if (limits[id]) {
+                motor.min_position = limits[id]["min_position"].as<float>();
+                motor.max_position = limits[id]["max_position"].as<float>();
+                float min_adjusted_position = motor.min_position - motor.initial_position;
+                float max_adjusted_position = motor.max_position - motor.initial_position;
 
-            RCLCPP_INFO(this->get_logger(), "Loaded motor %d limits: min=%.2f, max=%.2f",
-                        id, min_adjusted_position, max_adjusted_position);
-            motor.calibrated = true;
+                RCLCPP_INFO(this->get_logger(), "Loaded motor %d limits: min=%.2f, max=%.2f",
+                            id, min_adjusted_position, max_adjusted_position);
+                motor.calibrated = true;
+            } else {
+                RCLCPP_WARN(this->get_logger(), "Motor %d limits not found in config.", id);
+                return false;
+            }
         }
     } catch (const YAML::Exception &e) {
         RCLCPP_ERROR(this->get_logger(), "Failed to load motor limits: %s", e.what());
@@ -234,13 +241,29 @@ bool MotorController::saveMotorLimits() {
     return true;
 }
 
-void MotorController::jointPositionCallback(const bdx_msgs::msg::JointPositionTarget::SharedPtr msg, int motor_index) {
-    // Update the target position relative to the initial position
-    auto& motor = motors_[motor_index];
-    motor.target_position = motor.initial_position + msg->target_position;
-    motor.movement_speed = msg->movement_speed;
-    RCLCPP_INFO(this->get_logger(), "Motor %d: Received new target position: %.2f degrees, target speed: %.2f",
-                motor.motor_id, motor.target_position, motor.movement_speed);
+void MotorController::jointPositionCallback(const sensor_msgs::msg::JointState::SharedPtr msg) {
+    // For each joint in the message, update the target position for the corresponding motor
+    for (size_t i = 0; i < msg->name.size(); ++i) {
+        std::string joint_name = msg->name[i];
+        double target_position = msg->position[i]; // Positions are in radians
+
+        // Find the motor with the matching joint name
+        for (auto& motor : motors_) {
+            if (motor.joint_name == joint_name) {
+                // Update the target position relative to the initial position
+                motor.target_position = motor.initial_position + target_position * (180 / M_PI); // Convert radians to degrees
+
+                // If velocity is provided, update movement speed
+                if (msg->velocity.size() > i) {
+                    motor.movement_speed = msg->velocity[i] * (180 / M_PI); // Convert radians/sec to degrees/sec
+                }
+
+                RCLCPP_INFO(this->get_logger(), "Motor %d: Received new target position: %.2f degrees, target speed: %.2f",
+                            motor.motor_id, motor.target_position, motor.movement_speed);
+                break;
+            }
+        }
+    }
 }
 
 void MotorController::updateMotorPosition() {
@@ -289,7 +312,7 @@ void MotorController::updateMotorPosition() {
         sendRecvMotorCmd(motor, queryMotorMode(motor.selected_motor_type, MotorMode::FOC), 0, 0, rotor_angle_d, motor.rotor_kp, motor.rotor_kd);
 
         RCLCPP_DEBUG(this->get_logger(), "Motor %d: Current position: %.2f degrees, current speed: %.2f, movement speed: %.2f",
-                     motor.motor_id, motor.current_position, motor.movement_speed, motor.current_velocity);
+                     motor.motor_id, motor.current_position, motor.current_velocity, motor.movement_speed);
     }
 }
 

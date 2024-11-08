@@ -82,7 +82,6 @@ private:
     
 
     // ROS Parameters
-    std::vector<int> motor_ids_; // Array of motor IDs
     std::string config_file_; // Parameter to set the config file path
     int joint_state_publish_rate_;
     int motor_command_publish_rate_;

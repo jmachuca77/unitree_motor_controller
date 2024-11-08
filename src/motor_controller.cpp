@@ -15,7 +15,7 @@ MotorController::MotorController()
     this->get_parameter("config_file", config_file_);
     RCLCPP_INFO(this->get_logger(), "Config file: %s", config_file_.c_str());
 
-    // Load motor configurations from the config file
+    // Load motor configurations from the YAML config file
     YAML::Node config = YAML::LoadFile(config_file_);
     YAML::Node motors_config = config["motors"];
 
@@ -55,7 +55,7 @@ MotorController::MotorController()
         motor.min_speed_ = 5.0;
         motor.ramp_distance_ = 10.0;
 
-        motor.calibrated = false;
+            motor.calibrated = false;
         motor.is_calibrating = false;
         motor.max_position = std::numeric_limits<float>::lowest();
         motor.min_position = std::numeric_limits<float>::max();
@@ -74,8 +74,8 @@ MotorController::MotorController()
 
         // Initialize motor
         sendRecvMotorCmd(motor, queryMotorMode(motor.selected_motor_type, MotorMode::BRAKE), 0, 0, 0, 0, 0);
-        // motor.initial_position = motor.current_position;
-        // motor.target_position = motor.current_position;
+        motor.initial_position = motor.current_position;
+        motor.target_position = motor.current_position;
         RCLCPP_INFO(this->get_logger(), "Motor %d initial position set to %.2f degrees as the reference.", motor.motor_id, motor.initial_position);
 
         motors_.push_back(motor);
@@ -193,21 +193,26 @@ bool MotorController::loadMotorLimits() {
 
     try {
         YAML::Node config = YAML::LoadFile(config_file_);
-        YAML::Node limits = config["motor_limits"];
+        YAML::Node motors_config = config["motors"];
         for (auto& motor : motors_) {
-            int id = motor.motor_id;
-            if (limits[id]) {
-                motor.min_position = limits[id]["min_position"].as<float>();
-                motor.max_position = limits[id]["max_position"].as<float>();
-                float min_adjusted_position = motor.min_position - motor.initial_position;
-                float max_adjusted_position = motor.max_position - motor.initial_position;
+            for (std::size_t i = 0; i < motors_config.size(); ++i) {
+                if (motors_config[i]["motor_id"].as<int>() == motor.motor_id) {
+                    if (motors_config[i]["min_position"] && motors_config[i]["max_position"]) {
+                        motor.min_position = motors_config[i]["min_position"].as<float>();
+                        motor.max_position = motors_config[i]["max_position"].as<float>();
+                        float min_adjusted_position = motor.min_position - motor.initial_position;
+                        float max_adjusted_position = motor.max_position - motor.initial_position;
 
-                RCLCPP_INFO(this->get_logger(), "Loaded motor %d limits: min=%.2f, max=%.2f",
-                            id, min_adjusted_position, max_adjusted_position);
-                motor.calibrated = true;
-            } else {
-                RCLCPP_WARN(this->get_logger(), "Motor %d limits not found in config.", id);
-                return false;
+                        RCLCPP_INFO(this->get_logger(), "Loaded motor %d limits: min=%.2f, max=%.2f",
+                                    motor.motor_id, min_adjusted_position, max_adjusted_position);
+                        motor.calibrated = true;
+                    } else {
+                        RCLCPP_WARN(this->get_logger(), "Motor %d limits not found in config.", motor.motor_id);
+                        motor.calibrated = false;
+                        return false;
+                    }
+                    break;
+                }
             }
         }
     } catch (const YAML::Exception &e) {
@@ -219,25 +224,34 @@ bool MotorController::loadMotorLimits() {
 }
 
 bool MotorController::saveMotorLimits() {
-    YAML::Node config;
-    YAML::Node limits;
+    try {
+        YAML::Node config = YAML::LoadFile(config_file_);
+        YAML::Node motors_config = config["motors"];
 
-    for (auto& motor : motors_) {
-        int id = motor.motor_id;
-        limits[id]["min_position"] = motor.min_position;
-        limits[id]["max_position"] = motor.max_position;
-        float min_adjusted_position = motor.min_position - motor.initial_position;
-        float max_adjusted_position = motor.max_position - motor.initial_position;
+        for (auto& motor : motors_) {
+            for (std::size_t i = 0; i < motors_config.size(); ++i) {
+                if (motors_config[i]["motor_id"].as<int>() == motor.motor_id) {
+                    motors_config[i]["min_position"] = motor.min_position;
+                    motors_config[i]["max_position"] = motor.max_position;
+                    float min_adjusted_position = motor.min_position - motor.initial_position;
+                    float max_adjusted_position = motor.max_position - motor.initial_position;
 
-        RCLCPP_INFO(this->get_logger(), "Motor %d limits: min=%.2f, max=%.2f",
-                    id, min_adjusted_position, max_adjusted_position);
+                    RCLCPP_INFO(this->get_logger(), "Motor %d limits: min=%.2f, max=%.2f",
+                                motor.motor_id, min_adjusted_position, max_adjusted_position);
+                    break;
+                }
+            }
+        }
+
+        config["motors"] = motors_config;
+
+        std::ofstream fout(config_file_);
+        fout << config;
+        RCLCPP_INFO(this->get_logger(), "Motor limits saved to %s", config_file_.c_str());
+    } catch (const YAML::Exception &e) {
+        RCLCPP_ERROR(this->get_logger(), "Failed to save motor limits: %s", e.what());
+        return false;
     }
-
-    config["motor_limits"] = limits;
-
-    std::ofstream fout(config_file_);
-    fout << config;
-    RCLCPP_INFO(this->get_logger(), "Motor limits saved to %s", config_file_.c_str());
     return true;
 }
 
